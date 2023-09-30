@@ -1,0 +1,50 @@
+services:
+  minio:
+    image: minio/minio
+    ports:
+      - "9009:9000"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  minio-setup:
+    build:
+      context: .
+      dockerfile: mc.Dockerfile
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-migrated-cloudinary}
+    volumes:
+      - ./bucket-setup.sh:/bucket-setup.sh
+    command: ["/bin/sh", "-c", "/bucket-setup.sh"]
+
+  migrate:
+    build: .
+    depends_on:
+      minio:
+        condition: service_healthy
+      minio-setup:
+        condition: service_completed_successfully
+    environment:
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-${MINIO_ROOT_USER}}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD}}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-migrated-cloudinary}
+      CLOUDINARY_URL: ${CLOUDINARY_URL:?}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+volumes:
+  minio-data:
